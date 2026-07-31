@@ -109,14 +109,43 @@ static volatile int ata_lock;
  * the holder finish and release the lock sooner, extending the wait instead
  * of just riding it out. task_yield() breaks that: it hands the CPU back to
  * the scheduler instead of consuming a whole timeslice on a doomed poll. */
+/* Who holds it, for the stuck-waiter report below. -1 = free. Written only
+ * inside the critical section, so a torn read is impossible. */
+static volatile int ata_lock_owner = -1;
+
+/* A waiter that has yielded this many times has been waiting for minutes, which
+ * is never legitimate -- the longest real transfer is orders of magnitude
+ * shorter. Report ONCE and keep waiting (reporting is a diagnostic, not a
+ * recovery: silently breaking the lock would corrupt an in-flight transfer). */
+#define ATA_LOCK_STUCK_YIELDS 20000u
+
 static inline void ata_lock_take(void) {
-    uint32_t spins = 0;
+    uint32_t spins = 0, yields = 0; int reported = 0;
     while (__atomic_exchange_n(&ata_lock, 1, __ATOMIC_ACQUIRE)) {
-        if (++spins >= 1000) { spins = 0; task_yield(); }
+        if (++spins >= 1000) {
+            spins = 0; task_yield();
+            /* M1911: make an ATA-lock deadlock SAY SO. This was found the hard
+             * way -- a boot hang whose only symptom was the serial log stopping
+             * mid-TLS, which cost an entire investigation to localise by
+             * sampling RIP through the QEMU monitor. Every task that needs the
+             * disk piles up here, so the first thing worth knowing is who is
+             * holding it and that nobody is progressing. */
+            if (!reported && ++yields >= ATA_LOCK_STUCK_YIELDS) {
+                reported = 1;
+                kprintf("[ata] LOCK STUCK: task %d has waited ~minutes for ata_lock, "
+                        "held by task %d. Nothing that touches the disk can proceed "
+                        "(app launch, FS reads) until it is released.\n",
+                        task_current_id(), ata_lock_owner);
+            }
+        }
         else __asm__ volatile("pause");
     }
+    ata_lock_owner = task_current_id();
 }
-static inline void ata_lock_give(void) { __atomic_store_n(&ata_lock, 0, __ATOMIC_RELEASE); }
+static inline void ata_lock_give(void) {
+    ata_lock_owner = -1;
+    __atomic_store_n(&ata_lock, 0, __ATOMIC_RELEASE);
+}
 
 /* --- low-level busy/DRQ polling, scoped to a given I/O base ---------------- */
 

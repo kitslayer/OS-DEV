@@ -61,7 +61,7 @@ while [ $i -lt 50 ]; do
 done
 i=0
 while [ $i -lt 90 ]; do
-    grep -qE "certverify=|HTTPS GET example.com failed" "$LOG" 2>/dev/null && break
+    grep -q "boot network self-test finished" "$LOG" 2>/dev/null && break
     kill -0 "$QPID" 2>/dev/null || break
     sleep 0.5; i=$((i+1))
 done
@@ -119,12 +119,15 @@ require "eBPF JIT OK"                         "eBPF JIT: bytecode compiled to na
 require "Networking works!"                  "e1000 + ARP + ICMP echo (SLIRP gateway)"
 softrequire "200 OK"                         "TCP/HTTP GET to real example.com (needs internet)"
 softrequire "certverify=ok"                  "TLS 1.3 HTTPS to example.com: chain validated + certverify (needs internet)"
-require_either "HTTP GET example.com -> |HTTP GET example.com failed" \
-               "'HTTP GET example.com -> N bytes' or 'HTTP GET example.com failed'" \
-               "the plaintext HTTP fetch RETURNED (success or clean failure, not a hang)"
-require_either "certverify=|HTTPS GET example.com failed" \
-               "'certverify=...' or 'HTTPS GET example.com failed'" \
-               "the TLS 1.3 fetch RETURNED (success or clean failure, not a mid-handshake hang)"
+# M1911: key on net_demo's single unconditional completion marker rather than on
+# the HTTP/TLS outcome lines. Those lines are skipped entirely by the function's
+# EARLY RETURNS (no NIC, ARP timeout), so keying on them reported a clean early
+# exit as a hang -- a false positive in the M1909 check, found by starving the
+# task until ARP timed out. This marker is printed on every path, so its absence
+# means the self-test genuinely never returned.
+require_either "boot network self-test finished" \
+               "'[net] boot network self-test finished' (printed on EVERY path)" \
+               "the boot network self-test RETURNED (it did not hang mid-handshake)"
 require "mounted FAT32 volume"               "FAT32 mount"
     require "ATA read cache: fill+hit+write-invalidate coherent"  "ATA single-sector read cache (fill/hit/write-invalidate coherence, M1855)"
     require "I/O APIC at 0x"  "I/O APIC detected + mapped + routing primitives verified (M1856)"

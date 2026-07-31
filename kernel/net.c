@@ -2250,7 +2250,7 @@ int http_post(const char *host, const char *path, const char *ctype,
 void net_demo(void) {
     if (nic_init() != 0) {
         kprintf("[net] no supported NIC found (tried e1000, rtl8139).\n\n");
-        return;
+        goto done;
     }
 
     kprintf("[net] %s up. our MAC = ", nic_name());
@@ -2260,7 +2260,7 @@ void net_demo(void) {
     uint8_t gw_mac[6];
     if (!arp_resolve(GW_IP, gw_mac)) {
         kprintf("[net] ARP for 10.0.2.2 timed out.\n\n");
-        return;
+        goto done;
     }
     kprintf("[net] ARP: 10.0.2.2 is at ");
     print_mac(gw_mac);
@@ -2309,6 +2309,19 @@ void net_demo(void) {
     } else {
         kprintf("[tls] HTTPS GET example.com failed (no internet route, blocked :443, or handshake error)\n\n");
     }
+
+    /* ONE unambiguous terminal marker on EVERY path (M1911).
+     *
+     * M1909 added a headless check that a HANG in this self-test can no longer
+     * hide behind "the host is just offline". It keyed on the HTTP/TLS outcome
+     * lines -- but this function has EARLY RETURNS above (no NIC, ARP timeout)
+     * that never reach those lines at all, so a clean early exit was reported as
+     * a hang. That is a false positive in the detector, found by starving this
+     * task until ARP timed out. Printing here, on every path, makes the two
+     * cases distinguishable for good: this line present = the self-test RAN TO
+     * COMPLETION whatever the outcome; absent = it genuinely never returned. */
+done:
+    kprintf("[net] boot network self-test finished\n");
 }
 
 /* --- /proc/net (M1080): the network state nothing else exposed -------------
