@@ -859,6 +859,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
      * automated assertions at all until M1906. Non-blocking operations only; see
      * ipcselftest.c for why. Leaves no objects behind. */
     sched_selftest();   /* M1912: fast yields must advance vruntime */
+    rtc_selftest();     /* M1913: CMOS index/data pair is atomic under concurrency */
     ipc_selftest();
 
     kprintf("[main] launching the desktop environment...\n");
