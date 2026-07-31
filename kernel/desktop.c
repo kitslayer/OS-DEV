@@ -1359,6 +1359,7 @@ static void render_scene(void) {
             "F12   screenshot to disk",
             "Ctrl+Alt+Left/Right  workspace",
             "Super+1..4  go to workspace",
+            "+Shift  send window there",
             "",
             "MOUSE:",
             "Drag the title bar to move a window",
@@ -1508,6 +1509,20 @@ static void switch_ws(int to) {
     for (int i = 0; i < ws_count[to]; i++) windows[i] = ws_store[to][i];
     win_count = ws_count[to];
     cur_ws = to;
+}
+
+/* Send the focused window to workspace `to` (M1924). Switching between workspaces
+ * is only half the feature — without this, a window is stuck where it opened.
+ *
+ * Deliberately does NOT reuse remove_window(): that calls browser_destroy() on a
+ * KIND_BROWSER window, which would free the very page being moved. This unlinks
+ * the window without touching what it owns. */
+static void move_focused_to_ws(int to) {
+    if (to < 0 || to >= WS_N || to == cur_ws || win_count <= 0) return;
+    if (ws_count[to] >= MAX_WINDOWS) return;     /* target full: refuse, never drop a window */
+    int fi = win_count - 1;                      /* the focused window is the topmost */
+    ws_store[to][ws_count[to]++] = windows[fi];  /* arrives on top over there */
+    win_count--;                                 /* fi was the last slot: nothing to shift */
 }
 
 static void raise_window(int idx) {
@@ -2039,6 +2054,25 @@ void desktop_run(void) {
 
                 /* Ctrl+Alt+Left/Right: previous/next workspace (the Linux chord).
                  * Super+1..4 jumps straight to one. (M1923) */
+                /* Super+Shift+1..4 / Ctrl+Alt+Shift+Left/Right: MOVE the window
+                 * there (M1924). Checked before the plain switch chords below, so
+                 * Shift takes precedence rather than being ignored. */
+                if (shift_down && !rel &&
+                    ((ctrl_down && alt_down && (code == 0x4B || code == 0x4D)) ||
+                     (super_down && code >= 0x02 && code <= 0x02 + WS_N - 1))) {
+                    int to;
+                    if (super_down && code >= 0x02 && code <= 0x02 + WS_N - 1) {
+                        super_used = 1;
+                        to = code - 0x02;
+                    } else {
+                        to = (code == 0x4B) ? (cur_ws + WS_N - 1) % WS_N : (cur_ws + 1) % WS_N;
+                    }
+                    move_focused_to_ws(to);
+                    close_overlays();
+                    dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1;
+                    dirty = 1;
+                    continue;
+                }
                 if (ctrl_down && alt_down && !rel && (code == 0x4B || code == 0x4D)) {
                     int to = (code == 0x4B) ? (cur_ws + WS_N - 1) % WS_N : (cur_ws + 1) % WS_N;
                     switch_ws(to);
