@@ -409,8 +409,25 @@ static void switch_to_next(void) {
     uint64_t slice = now - prev->last_in;
     prev->last_in = now;
     prev->run_ms += slice;
-    if (!prev->is_floor)
-        prev->vruntime += slice * NICE0_WEIGHT / (prev->weight ? prev->weight : NICE0_WEIGHT);
+    if (!prev->is_floor) {
+        uint64_t charge = slice * NICE0_WEIGHT / (prev->weight ? prev->weight : NICE0_WEIGHT);
+        /* A sub-millisecond slice must STILL advance vruntime (M1912). timer_ms()
+         * has millisecond granularity, so a task that yields faster than that --
+         * exactly what every spin-then-yield lock in this kernel does
+         * (ata_lock_take, blk_lock_take, ...) -- was charged ZERO and stayed
+         * pinned at g_min_vruntime forever. CFS then always picked it over any
+         * task even one unit ahead, so a lock HOLDER could be starved
+         * indefinitely by its own waiters. Measured mid-deadlock:
+         *   min_vr=1420 | id7 vr=1420 (spinning) id6 vr=1420 (spinning)
+         *                | id0 vr=1430 READY, holding ata_lock, never picked
+         * Charging a floor of 1 makes vruntime strictly increase per switch, so a
+         * yield-spinner overtakes the holder within a few yields and the holder
+         * runs. This is a fairness toll on voluntary yielding, which is correct:
+         * a switch has real cost, and "yielded 10000 times" must not read as "used
+         * no CPU". */
+        if (charge == 0) charge = 1;
+        prev->vruntime += charge;
+    }
     if (prev->policy == SCHED_RR && prev->rt_ticks > 0) prev->rt_ticks--;   /* RR timeslice tick (M1172) */
 
     task_t *best = 0;
@@ -944,6 +961,30 @@ void task_unpin(int saved_pin_core) {
     current->pin_core = saved_pin_core;
     rq_lock_give();
     irq_restore(f);
+}
+
+
+/* The calling task's current vruntime — exposed so the boot self-test below can
+ * assert the M1912 fix directly instead of inferring it from a flaky hang. */
+uint64_t task_vruntime_self(void) { return current ? current->vruntime : 0; }
+
+/* Boot self-test (M1912): a task that yields FASTER than the millisecond clock
+ * must still accrue vruntime. If it does not, CFS pins it at g_min_vruntime and
+ * it can starve any task even one unit ahead — which is exactly how a spin-then-
+ * yield lock waiter (ata_lock_take) starved the task HOLDING the lock, wedging
+ * every disk user in the system. Deterministic: no timing, no hang required. */
+void sched_selftest(void) {
+    uint64_t a = task_vruntime_self();
+    for (int i = 0; i < 64; i++) task_yield();
+    uint64_t b = task_vruntime_self();
+    uint64_t d = b - a;
+    if (d >= 64)
+        kprintf("[ ok ] sched: 64 sub-millisecond yields advanced vruntime by %lu "
+                "(>=64: a yield-spinner cannot starve a lock holder)\n", (unsigned long)d);
+    else
+        kprintf("[FAIL] sched: 64 fast yields advanced vruntime by only %lu (need >=64) "
+                "— yield-spinners accrue nothing and WILL starve other runnable tasks\n",
+                (unsigned long)d);
 }
 
 int task_count(void) {

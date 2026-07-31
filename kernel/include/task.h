@@ -97,7 +97,9 @@ void    task_copy_fpu(task_t *dst, task_t *src);   /* clone src's live FP/SSE st
 struct registers *task_uframe(task_t *t);  /* the task's most recent ring-3 trap frame, or 0 (M1119) */
 void    task_stop(task_t *t);              /* suspend another task (READY/RUNNING -> STOPPED); not self */
 void    task_cont(task_t *t);              /* resume a STOPPED task */
-int     task_count(void);                  /* number of live tasks */
+int     task_count(void);
+uint64_t task_vruntime_self(void);   /* current task's CFS vruntime (M1912 self-test) */
+void     sched_selftest(void);       /* boot-time: fast yields must advance vruntime (M1912) */                  /* number of live tasks */
 
 /* A snapshot of one task, for `ps` and `/proc/sched`. */
 typedef struct { int id; int state; void *proc; uint64_t run_ms; uint64_t nswitch; uint64_t rq_wait_ms; uint64_t wchan; int nice; int policy; int rt_priority; } task_info_t;

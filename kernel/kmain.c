@@ -858,6 +858,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
      * memory, ptys, advisory locks, inotify, eventfd) — ~2,700 lines that had no
      * automated assertions at all until M1906. Non-blocking operations only; see
      * ipcselftest.c for why. Leaves no objects behind. */
+    sched_selftest();   /* M1912: fast yields must advance vruntime */
     ipc_selftest();
 
     kprintf("[main] launching the desktop environment...\n");
