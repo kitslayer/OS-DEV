@@ -161,7 +161,7 @@ struct browser {
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
-    struct { char tag[16]; char cls[32]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, savelh, hidden, saveindent, saveprews; uint8_t hasborder; uint8_t hasflex; uint8_t hasmaxw; uint8_t hasbg; uint8_t padb; uint8_t margb; uint16_t boxh; uint16_t boxminh; uint16_t boxmaxh; uint8_t bordbox; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/line-height/display:none/border/flex/block-bg + the element's class, for descendant-selector matching), a stack so nested styled elements compose */
+    struct { char tag[16]; char cls[32]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, savelh, hidden, saveindent, saveprews; uint8_t hasborder; uint8_t hasflex; uint8_t hasmaxw; uint8_t hasbg; uint8_t padb; uint8_t margb; uint16_t boxh; uint16_t boxminh; uint16_t boxmaxh; uint8_t bordbox; uint8_t ovhidden; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/line-height/display:none/border/flex/block-bg + the element's class, for descendant-selector matching), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
     sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; uint8_t css_list[CSS_MAX]; uint8_t css_lineheight[CSS_MAX]; uint8_t css_ws[CSS_MAX]; uint16_t css_spec[CSS_MAX]; uint16_t css_imp[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / line-height / display:none / border / list-style-type / specificity */
@@ -869,6 +869,25 @@ static int parse_style_minheight_px(const char *s, int n) {
     return num > 4000 ? 4000 : num;
 }
 
+/* `overflow: hidden` (or `clip`) on a block (M1917). Only these two values are
+ * honoured: they clip with no interaction affordance, so clipping IS the whole
+ * behaviour. `auto` and `scroll` also clip in CSS, but they clip WITH a scrollbar
+ * and scrollable content, and silently swallowing content the user could no
+ * longer reach would be worse than leaving it visible — so they are deliberately
+ * not treated as hidden. */
+static int parse_style_overflow_hidden(const char *st, int n) {
+    int vs, ve;
+    if (!style_prop(st, n, "overflow", 8, &vs, &ve) &&
+        !style_prop(st, n, "overflow-y", 10, &vs, &ve)) return 0;
+    const char *v = st + vs; int vl = ve - vs, i = 0;
+    while (i < vl && v[i] == ' ') i++;
+    if (i + 6 <= vl && (v[i]|32)=='h' && (v[i+1]|32)=='i' && (v[i+2]|32)=='d'
+        && (v[i+3]|32)=='d' && (v[i+4]|32)=='e' && (v[i+5]|32)=='n') return 1;
+    if (i + 4 <= vl && (v[i]|32)=='c' && (v[i+1]|32)=='l' && (v[i+2]|32)=='i'
+        && (v[i+3]|32)=='p') return 1;
+    return 0;
+}
+
 /* `max-height: <px>` on a block (M1910). Caps the box; taller content overflows
  * it (CSS 2.1 §10.7 + the default `overflow: visible`). Capped at 4000 like the
  * others so the value always fits the 12 bits the CLOSE token carries it in. */
@@ -1108,7 +1127,8 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 if (b->sc[sp].hasmaxw && b->ntok < TOK_MAX)
                     b->toks[b->ntok++] = (tok_t){ (uint32_t)(b->sc[sp].padb & 0xFF)
                                                     | (b->sc[sp].bordbox ? 0x100u : 0u)
-                                                    | ((uint32_t)(b->sc[sp].boxmaxh & 0xFFF) << 12),
+                                                    | ((uint32_t)(b->sc[sp].boxmaxh & 0xFFF) << 12)
+                                                    | (b->sc[sp].ovhidden ? (1u << 24) : 0u),
                                                   b->sc[sp].boxh, b->sc[sp].boxminh, STY_NORMAL, TK_MAXW_CLOSE };
                 if (b->sc[sp].hasbg && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, TK_BG_CLOSE };   /* end the block-bg fill region */
                 /* margin-bottom is OUTSIDE every box decoration, so it is applied
@@ -1120,7 +1140,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             }
         }
     } else if (!is_void_tag(tag)) {
-        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0, fjust = 0, mw = 0; int lh_css = 0; int prews = 0; int bwpx = 0, bmauto = 0, bpadl = 0, bpadr = 0, bpadt = 0, bpadb = 0, bmargb = 0, bbordbox = 0, bhpx = 0, bminh = 0, bmaxh = 0;   /* width (M1896) / padding (M1897, M1900) / margin-bottom + box-sizing (M1903) / min+max-height (M1905, M1910) */
+        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0, fjust = 0, mw = 0; int lh_css = 0; int prews = 0; int bwpx = 0, bmauto = 0, bpadl = 0, bpadr = 0, bpadt = 0, bpadb = 0, bmargb = 0, bbordbox = 0, bhpx = 0, bminh = 0, bmaxh = 0, bovh = 0;   /* width (M1896) / padding (M1897, M1900) / margin-bottom + box-sizing (M1903) / min+max-height (M1905, M1910) */
         if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al, &fs, &hide, &mv, &ml, &bd, &flex, &lh_css, &prews);   /* <style> rules first (lower priority) */
         if (mv) b->pending_vmargin = (uint16_t)mv;   /* CSS-rule vertical margin (an inline style= margin below overrides it) */
         const char *st; int stl;
@@ -1144,6 +1164,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             bhpx     = parse_style_height_px(st, stl);                         /* height (px) on a block (M1904) */
             bminh    = parse_style_minheight_px(st, stl);                      /* min-height (px) (M1905) */
             bmaxh    = parse_style_maxheight_px(st, stl);                       /* max-height (px) — caps the box, content spills (M1910) */
+            bovh     = parse_style_overflow_hidden(st, stl);                   /* overflow:hidden/clip — clip content to the box (M1917) */
 
             int ial = parse_style_align(st, stl);      if (ial) al = ial;   /* text-align */
             int ifs = parse_style_fontsize(st, stl);   if (ifs) fs = ifs;   /* font-size (enlarge) */
@@ -1216,6 +1237,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->sc[sp].boxh    = (uint16_t)bhpx;                           /* M1904 */
                 b->sc[sp].boxminh = (uint16_t)bminh;                          /* M1905 */
                 b->sc[sp].boxmaxh = (uint16_t)bmaxh;                          /* M1910 */
+                b->sc[sp].ovhidden = (uint8_t)(bovh ? 1 : 0);                 /* M1917 */
                 b->sc[sp].bordbox = (uint8_t)(bbordbox ? 1 : 0);
                 /* A block box that constrains its content column: max-width, an
                  * explicit width, or auto horizontal margins. The renderer solves
@@ -4418,13 +4440,17 @@ static uint32_t img_rowbuf[IMG_ROWBUF_MAX];
  * = width, link = h-padding, style = auto-margin + border-box bits). Rather than
  * add a token type, look the value up: a bounded integer walk with no painting,
  * which is the same thing the background does with its forward scan. */
-static uint32_t maxw_close_off(const browser_t *b, int i) {
+static const tok_t *maxw_close_tok(const browser_t *b, int i) {
     int depth = 0;
     for (int j = i; j < b->ntok; j++) {
         if (b->toks[j].type == TK_MAXW_OPEN)  { depth++; continue; }
-        if (b->toks[j].type == TK_MAXW_CLOSE) { if (--depth == 0) return b->toks[j].off; }
+        if (b->toks[j].type == TK_MAXW_CLOSE) { if (--depth == 0) return &b->toks[j]; }
     }
     return 0;
+}
+static uint32_t maxw_close_off(const browser_t *b, int i) {
+    const tok_t *c = maxw_close_tok(b, i);
+    return c ? c->off : 0u;
 }
 
 void browser_render(browser_t *b, int x, int y, int w, int h) {
@@ -4541,6 +4567,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
     int mxpt[16];
     int mxy[16];              /* content-top y per open block box, for `height` (M1904) */
     int mxcap[16];            /* absolute y where this box's max-height cap ends; 0x7FFFFFFF = uncapped (M1910) */
+    int mxclip[16];           /* absolute y to CLIP content at (overflow:hidden); 0x7FFFFFFF = no clip (M1917) */
     int bgsp = 0;   /* block-bg nesting depth: counted so a nested TK_BG_OPEN's forward-scan stops at ITS matching close (M993) */
     for (int t = 0; t < b->ntok && t < TOK_MAX; t++) {   /* t < TOK_MAX: provably in-bounds for the per-token arrays */
         tok_t *tk = &b->toks[t];
@@ -4633,6 +4660,24 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                                           ? cap - pbtop - (int)(cof & 0xFF) : cap;
                                    if (cc < 0) cc = 0;
                                    mxcap[mxsp - 1] = cy + cc;
+                               } }
+                             /* overflow:hidden — clip content to the box's declared
+                              * bottom (M1917). The bottom comes from `height` or
+                              * `max-height`, whichever is set (the smaller if both);
+                              * overflow:hidden on an AUTO-height box clips nothing,
+                              * because the box grows to fit its content by definition. */
+                             mxclip[mxsp - 1] = 0x7FFFFFFF;
+                             { const tok_t *ct = maxw_close_tok(b, t);
+                               if (ct && (ct->off & (1u << 24))) {
+                                   int hgt = (int)ct->len, cap = (int)((ct->off >> 12) & 0xFFFu);
+                                   int box = (hgt > 0 && cap > 0) ? (hgt < cap ? hgt : cap)
+                                           : (hgt > 0 ? hgt : cap);
+                                   if (box > 0) {
+                                       int cc = ((ct->off & 0x100u) != 0)
+                                              ? box - pbtop - (int)(ct->off & 0xFF) : box;
+                                       if (cc < 0) cc = 0;
+                                       mxclip[mxsp - 1] = cy + cc;
+                                   }
                                } } }
             cx = cl; continue;
         }
@@ -4924,8 +4969,18 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                 if (cy + lh > capy) cbg = BG;
             }
             uint32_t wbg = selected ? 0xFFE9A8 : (current ? 0x7FC0FF : (matched ? 0xCDE8FF : cbg));
+            /* overflow:hidden (M1917): a line whose top has passed the innermost clip
+             * bottom is outside its box and must not paint at all. Clipped at LINE
+             * granularity -- a partially visible line is dropped rather than
+             * half-drawn, because this renderer has no pixel-level clip region.
+             * Implemented by zeroing the draw length, which suppresses every drawing
+             * call below (glyphs, faux-bold overstrike, strike-through, underlines)
+             * without duplicating the guard on each one. */
+            int clipy_ = 0x7FFFFFFF;
+            for (int k = 0; k < mxsp; k++) if (mxclip[k] < clipy_) clipy_ = mxclip[k];
             int maxc = (cr - cx) / (GW * sc); if (maxc < 0) maxc = 0;
             int dl = tk->len > maxc ? maxc : tk->len;      /* clip to content width (no h-scroll) */
+            if (cy >= clipy_) dl = 0;                      /* vertically clipped away */
             int drawpx = dl * GW * sc;
             /* mouse text selection: highlight selected word tokens (white on blue) */
             if (b->tsel0 >= 0 && tk->type == TK_WORD) {

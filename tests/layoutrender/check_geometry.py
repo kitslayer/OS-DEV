@@ -55,6 +55,9 @@ COL = {
     "maxh_loose":(0xfe, 0x12, 0x12),   # max-height:400px on one line -> must not bind
     "maxh_min":  (0xfe, 0x13, 0x13),   # max-height:20px; min-height:70px -> min wins
     "maxh_bb":   (0xfe, 0x14, 0x14),   # max-height:60px; padding:10px; border-box
+    "clip":      (0xfe, 0x16, 0x16),   # max-height:40 + overflow:hidden
+    "clipdeep":  (0xfe, 0x17, 0x17),   # a span INSIDE it, past the cap -> must be ABSENT
+    "afterclip": (0xfe, 0x18, 0x18),   # the follower
     "tail":      (0xfe, 0x15, 0x15),   # page-3 sentinel
 }
 
@@ -117,7 +120,11 @@ def main():
         for name, rgb in COL.items():
             if boxes[name] is None:
                 boxes[name] = bbox(px, w, h, rgb)
-    missing = [n for n, v in boxes.items() if v is None]
+    # clipdeep is EXPECTED to be absent -- it is the overflow:hidden assertion
+    # (a colour that only appears if content outside its box was painted), so it
+    # must not be treated as a case that failed to render.
+    EXPECT_ABSENT = {"clipdeep"}
+    missing = [n for n, v in boxes.items() if v is None and n not in EXPECT_ABSENT]
     if missing:
         print("FAIL: these cases did not render at all: %s" % ", ".join(sorted(missing)))
         print("      (the page may not have loaded, or a colour changed in LAYCHK.HTM)")
@@ -257,11 +264,29 @@ def main():
     ck(abs(height("maxh_min") - 70) <= 6,
        "min-height:70px beats max-height:20px per §10.7 (got %d)" % height("maxh_min"))
     # border-box: the 60px cap INCLUDES the 2x10px padding.
-    ck(abs(advance("maxh_bb", "tail") - (60 + BREAK)) <= 6,
+    # NB: measured against `clip`, which is maxh_bb's immediate successor in the
+    # fixture -- M1917 inserted the overflow cases between maxh_bb and the tail
+    # sentinel, and an advance assertion is only meaningful between ADJACENT blocks.
+    ck(abs(advance("maxh_bb", "clip") - (60 + BREAK)) <= 6,
        "max-height:60px + padding:10px + border-box caps the total at 60px "
-       "(advance %d, expected %d)" % (advance("maxh_bb", "tail"), 60 + BREAK))
+       "(advance %d, expected %d)" % (advance("maxh_bb", "clip"), 60 + BREAK))
+    # --- overflow:hidden clips to the box (M1917) -----------------------------
+    # The decisive check is an ABSENCE. A <span> with its own background sits late
+    # in a max-height:40px; overflow:hidden block, i.e. below the cap, so if
+    # clipping works its colour never reaches the framebuffer at all. Asserting a
+    # colour is missing is much stronger than asserting a box got shorter -- a
+    # box can shrink for many reasons, but this colour can only appear if content
+    # outside the box was painted.
+    ck(boxes["clipdeep"] is None,
+       "overflow:hidden clips content below the box (the deep span's colour is absent)")
+    ck(abs(height("clip") - 40) <= 6,
+       "the clipped block is still 40px tall (got %d)" % height("clip"))
+    ck(abs(advance("clip", "afterclip") - (40 + BREAK)) <= 6,
+       "overflow:hidden does not change the flow advance, only what paints "
+       "(advance %d, expected %d)" % (advance("clip", "afterclip"), 40 + BREAK))
+
     # Page 3 must also be strictly stacked (same main-loop coverage argument).
-    seq3 = ["maxh", "after_max", "maxh_loose", "maxh_min", "maxh_bb", "tail"]
+    seq3 = ["maxh", "after_max", "maxh_loose", "maxh_min", "maxh_bb", "clip", "afterclip", "tail"]
     for prev, nxt in zip(seq3, seq3[1:]):
         ck(boxes[nxt][1] >= boxes[prev][1],
            "%s starts at or below %s's top, source order preserved (%d vs %d)"
