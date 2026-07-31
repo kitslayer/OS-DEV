@@ -101,6 +101,21 @@ static int sw_open, sw_sel;                 /* F7: Alt-Tab-style window switcher
  * commits the selection (the Windows/macOS model: hold Alt, tab to choose,
  * release to switch) while an F7-opened switcher still needs Enter. */
 static int alt_down, shift_down, sw_alt;
+
+/* Close the focused window. Shared by F8 and Alt+F4 (M1921) so the two chords
+ * cannot drift apart. An APP window is asked to exit and the reap loop drops it;
+ * everything else (browser, files, ...) goes immediately. Returns 1 if anything
+ * was closed, so the caller knows whether to mark the screen dirty. */
+static void remove_window(int idx);                     /* fwd */
+static int close_focused_window(void) {
+    if (win_count <= 0) return 0;
+    int fi = win_count - 1;
+    if (windows[fi].kind == KIND_APP && windows[fi].app)
+        app_request_kill((app_t *)windows[fi].app);
+    else
+        remove_window(fi);
+    return 1;
+}
 static int ctx_open, ctx_x, ctx_y, ctx_win; /* right-click menu (window kind: ctx_win is always the topmost window, win_count-1) */
 static int ctx_kind;                        /* 0 = window title-bar menu (ctx_win), 1 = desktop-background menu */
 /* Close every modal overlay. Called by each overlay's open path so at most one is
@@ -1298,8 +1313,8 @@ static void render_scene(void) {
             "F1    this help",        "F2    switch window",
             "F3    minimize",         "F4    maximize / restore",
             "F5    snap left",        "F6    snap right",
-            "F7 / Alt+Tab  switcher", "F8    close window",
-            "F9    Apps menu",
+            "F7 / Alt+Tab  switcher", "F8 / Alt+F4  close",
+            "F9 / Super   Apps menu",
             "F12   screenshot to disk",
             "",
             "MOUSE:",
@@ -1926,12 +1941,7 @@ void desktop_run(void) {
                 continue;
             }
             if (k == 0x1A) {                    /* F8: close the focused window */
-                if (win_count > 0) {
-                    int fi = win_count - 1;
-                    if (windows[fi].kind == KIND_APP && windows[fi].app)
-                        app_request_kill((app_t *)windows[fi].app);  /* app self-exits; reap loop drops the window */
-                    else
-                        remove_window(fi);       /* browser/files/etc: drop immediately */
+                if (close_focused_window()) {
                     dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1; dirty = 1;
                 }
                 continue;
@@ -1985,6 +1995,18 @@ void desktop_run(void) {
                         dirty = 1;
                     }
                     continue;                                  /* never let Tab reach the app */
+                }
+                if (code == 0x3E && !rel && alt_down) {        /* Alt+F4: close the window (M1921) */
+                    if (close_focused_window()) {
+                        dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1;
+                        dirty = 1;
+                    }
+                    continue;
+                }
+                if (code == 0x5B && !rel) {                   /* Super/Windows key: Apps menu (M1921) */
+                    int o = menu_open; close_overlays(); menu_open = !o; menu_sel = 0;
+                    dirty = 1;
+                    continue;
                 }
                 if (code == 0x38 && rel && sw_open && sw_alt) {  /* Alt released: commit */
                     raise_window(sw_sel);
