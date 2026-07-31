@@ -86,6 +86,29 @@ typedef struct {
 } window_t;
 
 static window_t windows[MAX_WINDOWS];
+
+/* ---- virtual desktops / workspaces (M1923) ----------------------------------
+ * The last standard desktop feature genuinely missing: macOS has Spaces, Windows
+ * has Task View, every Linux DE has workspaces.
+ *
+ * Implemented by SWAPPING THE WHOLE WINDOW ARRAY rather than tagging each window
+ * with a workspace id. That matters: sixteen separate loops in this file iterate
+ * `windows[]` to draw, hit-test, build taskbar chips, populate the switcher, cycle
+ * focus and route the wheel. Filtering all sixteen on a workspace id would work
+ * until one was missed, and a missed filter means a window that is invisible but
+ * still clickable, or reachable by Alt+Tab but never drawn. Swapping the array
+ * means every one of those loops sees exactly the current workspace with no
+ * change at all, so there is nothing to miss.
+ *
+ * Apps on other workspaces keep RUNNING, which is the point of workspaces. A
+ * stored window's app_t stays valid even if the app exits meanwhile, because
+ * app_reap() -- the only thing that frees it -- is driven from the reap loop over
+ * `windows[]`, so a cold-stored app is simply dead-but-unreaped and gets cleaned
+ * up on the first frame after switching back. */
+#define WS_N 4
+static window_t ws_store[WS_N][MAX_WINDOWS];
+static int      ws_count[WS_N];
+static int      cur_ws;
 static int win_count;
 static uint32_t *backbuffer;
 static uint32_t *scenebuf;          /* cached rendered scene (no cursor) */
@@ -100,7 +123,7 @@ static int sw_open, sw_sel;                 /* F7: Alt-Tab-style window switcher
  * modifier state. sw_alt marks a switcher opened by the chord, so releasing Alt
  * commits the selection (the Windows/macOS model: hold Alt, tab to choose,
  * release to switch) while an F7-opened switcher still needs Enter. */
-static int alt_down, shift_down, super_down, sw_alt;
+static int alt_down, shift_down, super_down, ctrl_down, sw_alt;
 static int super_used;   /* Super acted as a MODIFIER: don't also open the menu on release */
 
 /* Close the focused window. Shared by F8 and Alt+F4 (M1921) so the two chords
@@ -1255,6 +1278,23 @@ static void render_scene(void) {
         while (s && s[n] && n < 12) { t[n] = s[n]; n++; } t[n] = 0;
         draw_text(cx + 26, start_y + 4, t, mini ? THEME_TEXT_DIM : THEME_TEXT);
     }
+    /* workspace indicator (M1923): a compact 1-2-3-4 strip, current one lit, so
+     * which desktop you are on is visible rather than inferred from the windows. */
+    {
+        int wsw = WS_N * 16 + 8, wsx = clkx - wsw - 8;
+        if (wsx > TB_CHIPX0) {
+            fb_fill_rect(wsx, start_y, wsw, start_h, THEME_PANEL);
+            glow_border(wsx, start_y, wsw, start_h, THEME_BORDER_DIM, THEME_VOID);
+            for (int k = 0; k < WS_N; k++) {
+                int bx = wsx + 4 + k * 16;
+                int here = (k == cur_ws), used = here ? win_count : ws_count[k];
+                if (here) fb_fill_rect(bx, start_y + 3, 14, start_h - 6, THEME_SELECT);
+                char d[2] = { (char)('1' + k), 0 };
+                draw_text(bx + 4, start_y + 4, d,
+                          here ? THEME_MAGENTA : (used ? THEME_TEXT_DIM : THEME_BORDER_DIM));
+            }
+        }
+    }
     draw_clock_pill();
 
     if (menu_open) {
@@ -1317,6 +1357,8 @@ static void render_scene(void) {
             "F7 / Alt+Tab  switcher", "F8 / Alt+F4  close",
             "F9 / Super   Apps menu",
             "F12   screenshot to disk",
+            "Ctrl+Alt+Left/Right  workspace",
+            "Super+1..4  go to workspace",
             "",
             "MOUSE:",
             "Drag the title bar to move a window",
@@ -1456,6 +1498,16 @@ static void present_clock(void) {
     fb_set_target(backbuffer);
     restore_scene_rect(clkx, ty, clkw, TASKBAR_H);
     fb_present_rect(clkx, ty, clkw, TASKBAR_H);
+}
+
+/* Move to workspace `to`, parking the current window set (M1923). */
+static void switch_ws(int to) {
+    if (to < 0 || to >= WS_N || to == cur_ws) return;
+    for (int i = 0; i < win_count; i++) ws_store[cur_ws][i] = windows[i];
+    ws_count[cur_ws] = win_count;
+    for (int i = 0; i < ws_count[to]; i++) windows[i] = ws_store[to][i];
+    win_count = ws_count[to];
+    cur_ws = to;
 }
 
 static void raise_window(int idx) {
@@ -1983,6 +2035,26 @@ void desktop_run(void) {
                  * Alt+Tab is swallowed. */
                 if (code == 0x38)                    alt_down   = !rel;   /* Alt (either side; 0x200 = right) */
                 else if (code == 0x2A || code == 0x36) shift_down = !rel; /* Shift */
+                else if (code == 0x1D)                 ctrl_down  = !rel; /* Ctrl  */
+
+                /* Ctrl+Alt+Left/Right: previous/next workspace (the Linux chord).
+                 * Super+1..4 jumps straight to one. (M1923) */
+                if (ctrl_down && alt_down && !rel && (code == 0x4B || code == 0x4D)) {
+                    int to = (code == 0x4B) ? (cur_ws + WS_N - 1) % WS_N : (cur_ws + 1) % WS_N;
+                    switch_ws(to);
+                    close_overlays();
+                    dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1;
+                    dirty = 1;
+                    continue;
+                }
+                if (super_down && !rel && code >= 0x02 && code <= 0x02 + WS_N - 1) {  /* 1..4 */
+                    super_used = 1;
+                    switch_ws(code - 0x02);
+                    close_overlays();
+                    dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1;
+                    dirty = 1;
+                    continue;
+                }
 
                 if (code == 0x0F && !rel && alt_down) {       /* Alt+Tab / Alt+Shift+Tab */
                     if (win_count > 1) {
