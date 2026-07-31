@@ -97,8 +97,15 @@ static void pit_udelay(uint32_t us) {
     outb(0x42, (uint8_t)(count & 0xFF));
     outb(0x42, (uint8_t)(count >> 8));
     outb(0x61, (uint8_t)(p | 0x01));       /* gate high -> start the countdown */
-    while (!(inb(0x61) & 0x20))            /* wait for OUT (bit 5) = terminal count */
+    /* Bounded (M1919): an unbounded wait here hangs AP bring-up outright if the
+     * PIT channel-2 gate does not behave (some firmware, some hypervisors). The
+     * bound is far longer than the programmed countdown, so a working timer never
+     * reaches it; exceeding it just ends the delay early, which at worst makes a
+     * calibration slightly short instead of never booting. */
+    for (uint32_t g = 0; g < 20000000u; g++) {
+        if (inb(0x61) & 0x20) break;       /* OUT (bit 5) = terminal count */
         __asm__ volatile("pause");
+    }
 }
 
 /* ---- per-core LAPIC timer (M1532) ----------------------------------------
@@ -181,7 +188,10 @@ static int smp_run_one(void) {
 void smp_wake_aps(void) {
     if (!lapic) return;
     lapic_wr(LAPIC_ICRLO, 0x40 | (1u << 14) | (3u << 18));     /* fixed, assert, all-but-self */
-    while (lapic_rd(LAPIC_ICRLO) & ICR_PENDING) __asm__ volatile("pause");
+    /* Bounded (M1919): delivery status normally clears in microseconds; spinning
+     * forever on it would wedge whichever core sent the IPI. */
+    for (uint32_t g = 0; g < 10000000u && (lapic_rd(LAPIC_ICRLO) & ICR_PENDING); g++)
+        __asm__ volatile("pause");
 }
 
 /* Run fn over [0, n) split into chunks across all online cores, in parallel.

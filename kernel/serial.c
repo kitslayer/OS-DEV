@@ -40,9 +40,36 @@ static int tx_ready(void) {
     return inb(COM1 + UART_LINE_STATUS) & 0x20; /* transmit holding empty? */
 }
 
+/* BOUNDED transmit (M1919). This used to spin `while (!tx_ready())` forever, which
+ * made a missing or wedged COM1 a single point of total failure: every kprintf
+ * would hang, and since M1915 the console lock is held with interrupts DISABLED
+ * across a line, so the whole machine would freeze with no output and no way to
+ * see why. QEMU always emulates a working COM1, so this is invisible there and
+ * only bites on real hardware — exactly the kind of hang that is impossible to
+ * diagnose in the field.
+ *
+ * Two parts: a bounded spin (~0.2 s worth of port reads, against the ~87 us a
+ * byte actually takes at 115200 — three orders of magnitude of margin), and a
+ * STICKY dead flag, because bounding alone would still stall 0.2 s PER BYTE on a
+ * dead port, which is a hang by any practical measure. Recovery is automatic and
+ * costs one port read: a single probe per call while dead, so a port that starts
+ * working (or a later serial_init) resumes logging. Dropping a log byte is
+ * strictly better than wedging the kernel. */
+#define SERIAL_TX_SPINS 200000u
+static volatile int uart_dead;
+
 void serial_putc(char c) {
-    while (!tx_ready()) { /* spin until the UART can take a byte */ }
-    outb(COM1 + UART_DATA, (uint8_t)c);
+    if (uart_dead) {
+        if (!tx_ready()) return;         /* one cheap probe, then give up again */
+        uart_dead = 0;                   /* it came back */
+    }
+    for (uint32_t i = 0; i < SERIAL_TX_SPINS; i++) {
+        if (tx_ready()) {
+            outb(COM1 + UART_DATA, (uint8_t)c);
+            return;
+        }
+    }
+    uart_dead = 1;                       /* stop paying the timeout on every byte */
 }
 
 /* Drain any received bytes into the shared input queue. */
