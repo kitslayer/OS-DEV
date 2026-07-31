@@ -224,6 +224,18 @@ static const struct {
      * PRESENT in a dump (a block scrolled off screen is simply absent) — so they
      * get their own page and the checker merges boxes across both captures. */
     { "LAYCHK2 HTM", "<div style=\"width:400px;padding:20px;box-sizing:border-box;margin:0 auto;background:#fe0808\">seven</div><div style=\"width:200px;margin-bottom:60px;background:#fe0909\">eight</div><div style=\"width:200px;background:#fe0a0a\">nine</div><div style=\"width:200px;height:80px;background:#fe0b0b\">ten</div><div style=\"width:200px;height:80px;padding:15px;box-sizing:border-box;background:#fe0c0c\">eleven</div><div style=\"width:200px;min-height:70px;background:#fe0d0d\">twelve</div><div style=\"width:200px;min-height:20px;height:90px;background:#fe0e0e\">thirteen</div><div style=\"width:200px;background:#fe0f0f\">last</div>" },
+    /* Page 3 of the machine-checked fixture (M1910): max-height. Its own page
+     * because the runner never scrolls — every colour must be PRESENT in a dump of
+     * the top of the page, and page 2 has no room left.
+     *
+     * Every clamped case is followed by a plain block, because the assertion that
+     * matters is the FOLLOWER's top: max-height shrinks the flow advance, and only
+     * the follower's position can prove the MAIN LOOP clamped rather than just the
+     * background's forward scan (the M1905 lesson — a mutation that broke only the
+     * main loop passed every background-derived height check). Do not measure these
+     * by background height alone: glyphs paint their own background rect in the
+     * block's colour, so spilled text below the cap still emits that colour. */
+    { "LAYCHK3 HTM", "<div style=\"width:200px;max-height:40px;background:#fe1010\">This block sets max-height 40px and holds far more text than fits, so the box must stop at the cap while the rest spills out below it.</div><div style=\"width:200px;background:#fe1111\">after</div><div style=\"width:200px;max-height:400px;background:#fe1212\">loose</div><div style=\"width:200px;max-height:20px;min-height:70px;background:#fe1313\">minwins</div><div style=\"width:200px;max-height:60px;padding:10px;box-sizing:border-box;background:#fe1414\">Border-box max-height sixty with ten of padding and enough text to overflow it.</div><div style=\"width:200px;background:#fe1515\">tail</div>" },
     { "LOGO    SVG", "<svg width=\"64\" height=\"64\" viewBox=\"0 0 64 64\"><rect x=\"2\" y=\"2\" width=\"60\" height=\"60\" fill=\"#3366cc\"/><circle cx=\"32\" cy=\"32\" r=\"20\" fill=\"#ffcc00\"/><polygon points=\"32,12 52,52 12,52\" fill=\"#cc3333\"/></svg>" },
     { "XFORM   SVG", "<svg width=\"120\" height=\"120\" viewBox=\"0 0 120 120\"><rect width=\"120\" height=\"120\" fill=\"#eef\"/><g transform=\"translate(60,60)\"><rect x=\"0\" y=\"-6\" width=\"46\" height=\"12\" fill=\"#e33\"/><rect x=\"0\" y=\"-6\" width=\"46\" height=\"12\" fill=\"#3a3\" transform=\"rotate(90)\"/><rect x=\"0\" y=\"-6\" width=\"46\" height=\"12\" fill=\"#36c\" transform=\"rotate(180)\"/><rect x=\"0\" y=\"-6\" width=\"46\" height=\"12\" fill=\"#ec0\" transform=\"rotate(270)\"/></g><g transform=\"translate(22,98) scale(1.6)\"><circle cx=\"0\" cy=\"0\" r=\"7\" fill=\"#909\"/></g></svg>" },
     { "ICON    SVG", "<svg width=\"80\" height=\"80\" viewBox=\"0 0 24 24\" fill=\"#22aa77\"><path d=\"M12 2 L2 7 L2 17 L12 22 L22 17 L22 7 Z\"/><circle cx=\"12\" cy=\"12\" r=\"3.5\" fill=\"#ffffff\"/></svg>" },

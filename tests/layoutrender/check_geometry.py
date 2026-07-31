@@ -49,6 +49,13 @@ COL = {
     # overlap. Without it a main-loop under-advance on the final block is invisible
     # (a mutation exploited exactly that and survived).
     "sentinel":  (0xfe, 0x0f, 0x0f),
+    # --- page 3: max-height (M1910) ---------------------------------------------
+    "maxh":      (0xfe, 0x10, 0x10),   # width:200px; max-height:40px, content ~5 lines
+    "after_max": (0xfe, 0x11, 0x11),   # the follower: proves the FLOW advance clamped
+    "maxh_loose":(0xfe, 0x12, 0x12),   # max-height:400px on one line -> must not bind
+    "maxh_min":  (0xfe, 0x13, 0x13),   # max-height:20px; min-height:70px -> min wins
+    "maxh_bb":   (0xfe, 0x14, 0x14),   # max-height:60px; padding:10px; border-box
+    "tail":      (0xfe, 0x15, 0x15),   # page-3 sentinel
 }
 
 
@@ -210,6 +217,55 @@ def main():
         ck(boxes[nxt][1] >= boxes[prev][3],
            "%s starts at or below %s's bottom, no overlap (%d vs %d)"
            % (nxt, prev, boxes[nxt][1], boxes[prev][3]))
+
+    # --- max-height (M1910) --------------------------------------------------
+    # The property that SHRINKS a box. Deliberately measured by the FOLLOWER's top
+    # rather than by the clamped block's own background height, for two reasons:
+    #   1. it is the flow advance that max-height changes, and the flow advance is
+    #      what positions everything after it -- the MAIN LOOP, not the background's
+    #      forward scan. A mutation that clamped only the scan would pass a
+    #      height-of-the-background check and fail this one (see the M1905 lesson).
+    #   2. glyphs paint their own background rect in the block's colour, so text
+    #      spilling below the cap still emits that colour; the clamped block's own
+    #      bbox is therefore not a clean measure of its box.
+    def advance(a, b_):
+        return boxes[b_][1] - boxes[a][1]
+    # Consecutive blocks are separated by a block break, which advances by one line
+    # box before the next block's box begins -- so a block's top-to-top advance is
+    # its own height PLUS that break. Measured 18px, the same one-line constant the
+    # height checks above rely on. (Verified against every page-3 pair: a one-line
+    # block advances 36 = 18 + 18.)
+    BREAK = 18
+    # ~5 lines of text (~90px) capped at 40px: the follower must sit at the cap.
+    ck(abs(advance("maxh", "after_max") - (40 + BREAK)) <= 6,
+       "max-height:40px clamps the block's flow advance to 40px, so the next block "
+       "starts at the cap (advance %d, expected %d; unclamped would be ~108)"
+       % (advance("maxh", "after_max"), 40 + BREAK))
+    # And the painted box must not extend past the cap either. This is a SEPARATE
+    # failure mode from the advance: content spilling below the cap still paints its
+    # glyph background in the block's colour unless the renderer suppresses it, which
+    # would leave the box looking like it never clamped at all.
+    ck(height("maxh") <= 40 + 6,
+       "max-height:40px also caps the PAINTED box, so spilled text carries no block "
+       "background (got %d)" % height("maxh"))
+    # A max-height far above the content must NOT stretch the box (it only ever
+    # lowers): one line stays one line.
+    ck(height("maxh_loose") <= 30,
+       "max-height:400px does not stretch a one-line block (got %d)" % height("maxh_loose"))
+    # CSS 2.1 §10.7 order: max-height is applied first, then min-height overrides
+    # it -- so a min-height LARGER than the max-height wins outright.
+    ck(abs(height("maxh_min") - 70) <= 6,
+       "min-height:70px beats max-height:20px per §10.7 (got %d)" % height("maxh_min"))
+    # border-box: the 60px cap INCLUDES the 2x10px padding.
+    ck(abs(advance("maxh_bb", "tail") - (60 + BREAK)) <= 6,
+       "max-height:60px + padding:10px + border-box caps the total at 60px "
+       "(advance %d, expected %d)" % (advance("maxh_bb", "tail"), 60 + BREAK))
+    # Page 3 must also be strictly stacked (same main-loop coverage argument).
+    seq3 = ["maxh", "after_max", "maxh_loose", "maxh_min", "maxh_bb", "tail"]
+    for prev, nxt in zip(seq3, seq3[1:]):
+        ck(boxes[nxt][1] >= boxes[prev][1],
+           "%s starts at or below %s's top, source order preserved (%d vs %d)"
+           % (nxt, prev, boxes[nxt][1], boxes[prev][1]))
 
     # --- a nested background stays inside its padded parent ------------------
     il, it, ir, ib = boxes["wide_in"]

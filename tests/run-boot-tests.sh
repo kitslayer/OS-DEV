@@ -99,6 +99,14 @@ require_either() {
     else
         echo "  MISSING: $3 -- neither outcome was printed, so the call never returned (a HANG, not an offline host)"
         echo "           (expected one of: $2)"
+        # Dump where it actually stopped. Without this the report says "a hang"
+        # and gives the reader nothing to diagnose it with -- and the whole reason
+        # this check exists is that the ORIGINAL stall report was unusable for
+        # exactly that reason.
+        echo "           ----- guest serial, last network lines -----"
+        grep -E "^\[net\]|^\[tls\]|^\[dns\]" "$LOG" 2>/dev/null | tail -8 | sed 's/^/           /'
+        echo "           ----- very tail of the log -----"
+        tail -4 "$LOG" 2>/dev/null | sed 's/^/           /'
         fail=1
     fi
 }

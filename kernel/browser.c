@@ -161,7 +161,7 @@ struct browser {
     int     bodyoff, bodylen;                            /* current page's body region in raw (for click-time JS re-render) */
     char    ls_keys[16][32]; char ls_vals[16][160]; int ls_n;   /* per-page localStorage (survives per-run JS arena resets) */
     char    oc_tag[16]; int oc_depth, oc_link, oc_style;        /* active inline-onclick scope (0 depth = none) */
-    struct { char tag[16]; char cls[32]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, savelh, hidden, saveindent, saveprews; uint8_t hasborder; uint8_t hasflex; uint8_t hasmaxw; uint8_t hasbg; uint8_t padb; uint8_t margb; uint16_t boxh; uint16_t boxminh; uint8_t bordbox; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/line-height/display:none/border/flex/block-bg + the element's class, for descendant-selector matching), a stack so nested styled elements compose */
+    struct { char tag[16]; char cls[32]; int depth; uint32_t savecolor, savebg; int savestyle, setstyle, saveul, savetransform, savealign, savescale, savelh, hidden, saveindent, saveprews; uint8_t hasborder; uint8_t hasflex; uint8_t hasmaxw; uint8_t hasbg; uint8_t padb; uint8_t margb; uint16_t boxh; uint16_t boxminh; uint16_t boxmaxh; uint8_t bordbox; } sc[SC_MAX];  /* nested style scopes (color/bg/font-weight/font-style/underline/transform/align/font-size/line-height/display:none/border/flex/block-bg + the element's class, for descendant-selector matching), a stack so nested styled elements compose */
     int     sc_sp;                                              /* number of active style frames (0 = none) */
     int     n_hidden;                                          /* >0 while inside a display:none element: suppress all emission */
     sel_t   css_sel[CSS_MAX]; uint32_t css_color[CSS_MAX]; int16_t css_style[CSS_MAX]; uint8_t css_ul[CSS_MAX]; uint8_t css_transform[CSS_MAX]; uint32_t css_bg[CSS_MAX]; uint8_t css_align[CSS_MAX]; uint8_t css_size[CSS_MAX]; uint8_t css_disp[CSS_MAX]; uint8_t css_margin[CSS_MAX]; uint8_t css_indent[CSS_MAX]; uint32_t css_border[CSS_MAX]; uint8_t css_list[CSS_MAX]; uint8_t css_lineheight[CSS_MAX]; uint8_t css_ws[CSS_MAX]; uint16_t css_spec[CSS_MAX]; uint16_t css_imp[CSS_MAX]; int n_css;  /* <style> rules: selector -> color / text-style / underline / text-transform / background / text-align / font-size / line-height / display:none / border / list-style-type / specificity */
@@ -847,14 +847,16 @@ static int parse_style_height_px(const char *s, int n) {
 /* `min-height: <px>` on a block (M1905). Grows the box when the content is
  * shorter, using the same mechanism as `height`.
  *
- * `max-height` is deliberately NOT implemented, and the reason is architectural
- * rather than effort: with content taller than the limit, CSS keeps the BOX at
- * max-height while the content still occupies its natural space and overflows.
- * In this renderer a block's painted extent IS its flow advance (the background
- * rect comes from how far the cursor moved), so box height cannot be decoupled
- * from flow height without out-of-flow boxes — the same limitation that rules out
- * float/position/z-index. Shrinking the advance instead would overlap whatever
- * follows, which is worse than ignoring the property. */
+ * HISTORICAL NOTE (corrected M1910): this spot used to carry a comment claiming
+ * `max-height` was blocked "architecturally rather than [by] effort", because a
+ * block's painted extent IS its flow advance, and concluding that "shrinking the
+ * advance instead would overlap whatever follows, which is worse than ignoring
+ * the property". That conclusion was WRONG: overlapping the following content is
+ * precisely what CSS `max-height` with the default `overflow: visible` does — the
+ * box stops at the limit and its content spills out of it. So max-height is just
+ * the symmetric clamp to the code above (`height`/`min-height` only ever RAISE
+ * the cursor to a target; max-height LOWERS it), and it is implemented below.
+ * float/position/z-index really do still need out-of-flow boxes. */
 static int parse_style_minheight_px(const char *s, int n) {
     int vs, ve;
     if (!style_prop(s, n, "min-height", 10, &vs, &ve)) return 0;
@@ -863,6 +865,21 @@ static int parse_style_minheight_px(const char *s, int n) {
     while (i < vl && v[i] >= '0' && v[i] <= '9') { num = num*10 + (v[i]-'0'); i++; digits++; }
     if (!digits) return 0;
     if (i < vl && v[i] == '%') return 0;
+    if (i + 1 < vl && (v[i]|32) == 'e' && (v[i+1]|32) == 'm') num *= 16;
+    return num > 4000 ? 4000 : num;
+}
+
+/* `max-height: <px>` on a block (M1910). Caps the box; taller content overflows
+ * it (CSS 2.1 §10.7 + the default `overflow: visible`). Capped at 4000 like the
+ * others so the value always fits the 12 bits the CLOSE token carries it in. */
+static int parse_style_maxheight_px(const char *s, int n) {
+    int vs, ve;
+    if (!style_prop(s, n, "max-height", 10, &vs, &ve)) return 0;
+    const char *v = s + vs; int vl = ve - vs, i = 0, num = 0, digits = 0;
+    while (i < vl && v[i] == ' ') i++;
+    while (i < vl && v[i] >= '0' && v[i] <= '9') { num = num*10 + (v[i]-'0'); i++; digits++; }
+    if (!digits) return 0;                      /* `none` (the initial value) included */
+    if (i < vl && v[i] == '%') return 0;        /* percentages need a resolved containing block */
     if (i + 1 < vl && (v[i]|32) == 'e' && (v[i+1]|32) == 'm') num *= 16;
     return num > 4000 ? 4000 : num;
 }
@@ -1084,9 +1101,14 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 /* CLOSE also carries the declared HEIGHT in `len` and the border-box
                  * bit in off:8 — close is exactly when the renderer needs them, to
                  * stretch the block down to its declared height (M1904). */
+                /* `off` bits: 0-7 padding-bottom, 8 border-box, 12-23 max-height
+                 * (M1910). len and link were already taken by height and min-height,
+                 * and off's high bits were free — the same spare-bits trick the
+                 * border/background tokens use. 12 bits holds the 4000px cap. */
                 if (b->sc[sp].hasmaxw && b->ntok < TOK_MAX)
                     b->toks[b->ntok++] = (tok_t){ (uint32_t)(b->sc[sp].padb & 0xFF)
-                                                    | (b->sc[sp].bordbox ? 0x100u : 0u),
+                                                    | (b->sc[sp].bordbox ? 0x100u : 0u)
+                                                    | ((uint32_t)(b->sc[sp].boxmaxh & 0xFFF) << 12),
                                                   b->sc[sp].boxh, b->sc[sp].boxminh, STY_NORMAL, TK_MAXW_CLOSE };
                 if (b->sc[sp].hasbg && b->ntok < TOK_MAX) b->toks[b->ntok++] = (tok_t){ 0, 0, NO_LINK, STY_NORMAL, TK_BG_CLOSE };   /* end the block-bg fill region */
                 /* margin-bottom is OUTSIDE every box decoration, so it is applied
@@ -1098,7 +1120,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             }
         }
     } else if (!is_void_tag(tag)) {
-        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0, fjust = 0, mw = 0; int lh_css = 0; int prews = 0; int bwpx = 0, bmauto = 0, bpadl = 0, bpadr = 0, bpadt = 0, bpadb = 0, bmargb = 0, bbordbox = 0, bhpx = 0, bminh = 0;   /* width (M1896) / padding (M1897, M1900) / margin-bottom + box-sizing (M1903) */
+        uint32_t c = 0; int ts = -1, ul = 0, tr = 0; uint32_t bg = 0; int al = 0, fs = 0, hide = 0, mv = 0, ml = 0; uint32_t bd = 0; int flex = 0, fgap = 0, fjust = 0, mw = 0; int lh_css = 0; int prews = 0; int bwpx = 0, bmauto = 0, bpadl = 0, bpadr = 0, bpadt = 0, bpadb = 0, bmargb = 0, bbordbox = 0, bhpx = 0, bminh = 0, bmaxh = 0;   /* width (M1896) / padding (M1897, M1900) / margin-bottom + box-sizing (M1903) / min+max-height (M1905, M1910) */
         if (b->n_css > 0) css_match(b, tag, attrs, attrlen, &c, &ts, &ul, &tr, &bg, &al, &fs, &hide, &mv, &ml, &bd, &flex, &lh_css, &prews);   /* <style> rules first (lower priority) */
         if (mv) b->pending_vmargin = (uint16_t)mv;   /* CSS-rule vertical margin (an inline style= margin below overrides it) */
         const char *st; int stl;
@@ -1121,6 +1143,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
             bbordbox = parse_style_border_box(st, stl);                       /* box-sizing:border-box (M1903) */
             bhpx     = parse_style_height_px(st, stl);                         /* height (px) on a block (M1904) */
             bminh    = parse_style_minheight_px(st, stl);                      /* min-height (px) (M1905) */
+            bmaxh    = parse_style_maxheight_px(st, stl);                       /* max-height (px) — caps the box, content spills (M1910) */
 
             int ial = parse_style_align(st, stl);      if (ial) al = ial;   /* text-align */
             int ifs = parse_style_fontsize(st, stl);   if (ifs) fs = ifs;   /* font-size (enlarge) */
@@ -1169,7 +1192,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                  * so the border, the box itself and the background all agree. */
                 int box_owner = (mw > 0 || bwpx > 0 || bmauto || bpadl > 0 || bpadr > 0
                                  || bpadt > 0 || bpadb > 0 || bbordbox || bhpx > 0
-                                 || bminh > 0);
+                                 || bminh > 0 || bmaxh > 0);
                 b->sc[sp].hasborder = 0;
                 if (bd && is_block_tag(tag) && b->ntok < TOK_MAX && b->n_hidden == 0) {   /* bracket the block's tokens with a border marker, drawn as one rect at render */
                     /* Bit 24 of `off` (above the 24-bit colour) marks that this element
@@ -1192,6 +1215,7 @@ static void handle_tag(browser_t *b, const char *tag, int closing,
                 b->sc[sp].margb = (uint8_t)(bmargb > 255 ? 255 : bmargb);   /* M1903 */
                 b->sc[sp].boxh    = (uint16_t)bhpx;                           /* M1904 */
                 b->sc[sp].boxminh = (uint16_t)bminh;                          /* M1905 */
+                b->sc[sp].boxmaxh = (uint16_t)bmaxh;                          /* M1910 */
                 b->sc[sp].bordbox = (uint8_t)(bbordbox ? 1 : 0);
                 /* A block box that constrains its content column: max-width, an
                  * explicit width, or auto horizontal margins. The renderer solves
@@ -4384,6 +4408,25 @@ static void box(int x, int y, int w, int h, uint32_t c) {
 #define IMG_ROWBUF_MAX 4096
 static uint32_t img_rowbuf[IMG_ROWBUF_MAX];
 
+/* The `off` payload of the TK_MAXW_CLOSE matching the TK_MAXW_OPEN at index `i`,
+ * or 0 if unmatched (M1910).
+ *
+ * max-height is carried on the CLOSE token, because that is where the renderer
+ * needs `height`/`min-height`/padding-bottom. But suppressing the block background
+ * under spilled content needs the cap at OPEN time, and the OPEN token's payload
+ * is already fully spoken for (off = max-width | padding-top | padding-bottom, len
+ * = width, link = h-padding, style = auto-margin + border-box bits). Rather than
+ * add a token type, look the value up: a bounded integer walk with no painting,
+ * which is the same thing the background does with its forward scan. */
+static uint32_t maxw_close_off(const browser_t *b, int i) {
+    int depth = 0;
+    for (int j = i; j < b->ntok; j++) {
+        if (b->toks[j].type == TK_MAXW_OPEN)  { depth++; continue; }
+        if (b->toks[j].type == TK_MAXW_CLOSE) { if (--depth == 0) return b->toks[j].off; }
+    }
+    return 0;
+}
+
 void browser_render(browser_t *b, int x, int y, int w, int h) {
     uint32_t BG = 0xFFFFFF, page_fg = 0;
     for (int r = 0; r < b->n_css; r++) {                 /* page bg + default text colour from body/html (M1432, M1437) */
@@ -4497,6 +4540,7 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                                * can start ABOVE the content it wraps (M1900) */
     int mxpt[16];
     int mxy[16];              /* content-top y per open block box, for `height` (M1904) */
+    int mxcap[16];            /* absolute y where this box's max-height cap ends; 0x7FFFFFFF = uncapped (M1910) */
     int bgsp = 0;   /* block-bg nesting depth: counted so a nested TK_BG_OPEN's forward-scan stops at ITS matching close (M993) */
     for (int t = 0; t < b->ntok && t < TOK_MAX; t++) {   /* t < TOK_MAX: provably in-bounds for the per-token arrays */
         tok_t *tk = &b->toks[t];
@@ -4576,7 +4620,20 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                              /* Open the top padding band: content starts below it, and
                               * the background (emitted next) reaches back up over it. */
                              pbtop = box_pad_top(tk); cy += pbtop;
-                             mxy[mxsp - 1] = cy; }        /* content top, for `height` (M1904) */
+                             mxy[mxsp - 1] = cy;          /* content top, for `height` (M1904) */
+                             /* Where this box's max-height cap falls, so content that
+                              * spills past it can be painted WITHOUT the box's
+                              * background — the background belongs to the box, and the
+                              * box stopped at the cap. (M1910) */
+                             mxcap[mxsp - 1] = 0x7FFFFFFF;
+                             { uint32_t cof = maxw_close_off(b, t);
+                               int cap = (int)((cof >> 12) & 0xFFFu);
+                               if (cap > 0) {
+                                   int cc = ((cof & 0x100u) != 0)      /* border-box: cap includes padding */
+                                          ? cap - pbtop - (int)(cof & 0xFF) : cap;
+                                   if (cc < 0) cc = 0;
+                                   mxcap[mxsp - 1] = cy + cc;
+                               } } }
             cx = cl; continue;
         }
         if (tk->type == TK_MAXW_CLOSE) {
@@ -4588,10 +4645,22 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
              * the content height. Content TALLER than `height` still overflows, which
              * matches CSS — it does not clip without `overflow`. */
             int hspec = (int)tk->len, minh = (int)tk->link;
-            if ((hspec > 0 || minh > 0) && mxsp > 0) {
+            int maxh = (int)((tk->off >> 12) & 0xFFFu);        /* max-height (M1910) */
+            if ((hspec > 0 || minh > 0 || maxh > 0) && mxsp > 0) {
                 int bb = (tk->off & 0x100u) != 0;      /* border-box: heights include padding */
-                int ch = hspec;
+                int top = mxy[mxsp - 1];
+                /* The content height the flow actually produced. cy already includes
+                 * the bottom padding band added just above, so peel it back off. */
+                int nch = cy - cpadb - top; if (nch < 0) nch = 0;
+                int ch = (hspec > 0) ? hspec : nch;
                 if (hspec > 0 && bb) { ch = hspec - pbtop - cpadb; if (ch < 0) ch = 0; }
+                /* §10.7 applies max-height FIRST and then min-height, so min wins
+                 * over a smaller max — that ordering is the spec's, not a tiebreak. */
+                if (maxh > 0) {
+                    int cmax = bb ? (maxh - pbtop - cpadb) : maxh;
+                    if (cmax < 0) cmax = 0;
+                    if (ch > cmax) ch = cmax;
+                }
                 /* min-height raises the used content height (§10.7); it wins over a
                  * smaller declared `height`, which is the spec's precedence. */
                 if (minh > 0) {
@@ -4599,8 +4668,14 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                     if (cmin < 0) cmin = 0;
                     if (cmin > ch) ch = cmin;
                 }
-                int target = mxy[mxsp - 1] + ch + cpadb;
-                if (cy < target) cy = target;
+                int target = top + ch + cpadb;
+                /* `height`/`min-height` only ever GROW the box: content taller than a
+                 * declared height overflows it rather than being squeezed. max-height
+                 * is the one property here that SHRINKS the advance — the box stops at
+                 * the cap, the content already painted below it spills out, and what
+                 * follows starts at the cap and overlaps the spill. That overlap is
+                 * not a compromise: it is what `overflow: visible` renders. (M1910) */
+                if (cy < target || (maxh > 0 && cy > target)) cy = target;
             }
             if (mxsp > 0) { --mxsp; cl = mxcl[mxsp]; cr = mxcr[mxsp]; pbl = mxpl[mxsp]; pbr = mxpr[mxsp]; pbtop = mxpt[mxsp]; }
             cx = cl; curlh = 18; continue;
@@ -4652,19 +4727,29 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
                      * the stack is empty (its OPEN predates this window), so fall back
                      * to the seeded geometry. (M1904) */
                     int shspec = (int)tu->len, sminh = (int)tu->link;
-                    if (shspec > 0 || sminh > 0) {
+                    int smaxh = (int)((tu->off >> 12) & 0xFFFu);   /* max-height (M1910) */
+                    if (shspec > 0 || sminh > 0 || smaxh > 0) {
                         int base = (smxsp > 0) ? smxy[smxsp-1]  : stop0;
                         int ptop = (smxsp > 0) ? smxpt[smxsp-1] : sptop0;
                         int sbb  = (tu->off & 0x100u) != 0;
-                        int sch  = shspec;
+                        int snch = scy - spadb - base; if (snch < 0) snch = 0;
+                        int sch  = (shspec > 0) ? shspec : snch;
                         if (shspec > 0 && sbb) { sch = shspec - ptop - spadb; if (sch < 0) sch = 0; }
+                        if (smaxh > 0) {                          /* cap, then min (§10.7 order) */
+                            int scmax = sbb ? (smaxh - ptop - spadb) : smaxh;
+                            if (scmax < 0) scmax = 0;
+                            if (sch > scmax) sch = scmax;
+                        }
                         if (sminh > 0) {
                             int scmin = sbb ? (sminh - ptop - spadb) : sminh;
                             if (scmin < 0) scmin = 0;
                             if (scmin > sch) sch = scmin;
                         }
                         int starget = base + sch + spadb;
-                        if (scy < starget) scy = starget;
+                        /* Same asymmetry as the main loop: only max-height shrinks, so
+                         * the BACKGROUND stops at the cap while the spilled content
+                         * paints past it. (M1910) */
+                        if (scy < starget || (smaxh > 0 && scy > starget)) scy = starget;
                     }
                     if (smxsp > 0) { --smxsp; scl = smxcl[smxsp]; scr = smxcr[smxsp]; }
                     scx = scl; slh = 0; continue;
@@ -4822,6 +4907,22 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             /* content background: explicit CSS background-color wins over the <mark> default */
             uint32_t cbg = (b->tokbg[t] & 0x01000000) ? (b->tokbg[t] & 0xFFFFFF)
                          : (tk->style == STY_MARK ? 0xFFF080 : BG);
+            /* Content below a max-height cap is OUTSIDE its box, so it must not carry
+             * that box's background: a glyph paints its own background rect, and
+             * without this the spilled text keeps the block colour and the block looks
+             * like it never clamped at all. The effective cap is the INNERMOST one
+             * (the min over the open boxes), since a nested box can be capped by an
+             * ancestor as well as by itself. (M1910) */
+            if (mxsp > 0 && (b->tokbg[t] & 0x02000000)) {
+                int capy = 0x7FFFFFFF;
+                for (int k = 0; k < mxsp; k++) if (mxcap[k] < capy) capy = mxcap[k];
+                /* Test the glyph's BOTTOM edge, not its top: the line box that
+                 * STRADDLES the cap starts inside the box but paints through it, and
+                 * keying on the top left that line's background painting 12px past
+                 * the cap. The box's own background rect (clamped by the forward
+                 * scan) already covers everything legitimately inside. */
+                if (cy + lh > capy) cbg = BG;
+            }
             uint32_t wbg = selected ? 0xFFE9A8 : (current ? 0x7FC0FF : (matched ? 0xCDE8FF : cbg));
             int maxc = (cr - cx) / (GW * sc); if (maxc < 0) maxc = 0;
             int dl = tk->len > maxc ? maxc : tk->len;      /* clip to content width (no h-scroll) */
