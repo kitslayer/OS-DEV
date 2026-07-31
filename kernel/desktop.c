@@ -93,6 +93,14 @@ static int screen_w, screen_h;
 static int spawn_n, menu_open, menu_sel;   /* menu_sel: keyboard-highlighted item */
 static int help_open;                       /* F1: keyboard-shortcut help overlay */
 static int sw_open, sw_sel;                 /* F7: Alt-Tab-style window switcher overlay (sw_sel: highlighted window) */
+/* Real Alt+Tab (M1920). The switcher above already existed and worked, but only
+ * F7 opened it — and nobody discovers F7. Everyone presses Alt+Tab, and pressing
+ * it did nothing at all, which reads as "this desktop has no window switching".
+ * Driven from the RAW scancode stream because the cooked layer reports no
+ * modifier state. sw_alt marks a switcher opened by the chord, so releasing Alt
+ * commits the selection (the Windows/macOS model: hold Alt, tab to choose,
+ * release to switch) while an F7-opened switcher still needs Enter. */
+static int alt_down, shift_down, sw_alt;
 static int ctx_open, ctx_x, ctx_y, ctx_win; /* right-click menu (window kind: ctx_win is always the topmost window, win_count-1) */
 static int ctx_kind;                        /* 0 = window title-bar menu (ctx_win), 1 = desktop-background menu */
 /* Close every modal overlay. Called by each overlay's open path so at most one is
@@ -1290,7 +1298,7 @@ static void render_scene(void) {
             "F1    this help",        "F2    switch window",
             "F3    minimize",         "F4    maximize / restore",
             "F5    snap left",        "F6    snap right",
-            "F7    window switcher",  "F8    close window",
+            "F7 / Alt+Tab  switcher", "F8    close window",
             "F9    Apps menu",
             "F12   screenshot to disk",
             "",
@@ -1841,6 +1849,7 @@ void desktop_run(void) {
                 if (k == 27) { ctx_open = 0; dirty = 1; }   /* the rest so no F-key reorders under it */
                 continue;
             }
+            if (k == '\t' && alt_down) continue;   /* the Tab of Alt+Tab was already consumed raw (M1920) */
             if (k == 0x1D) {                    /* F1: toggle the keyboard-shortcut help overlay */
                 int o = help_open; close_overlays(); help_open = !o; dirty = 1;   /* one overlay at a time */
                 continue;
@@ -1851,6 +1860,7 @@ void desktop_run(void) {
             }
             if (k == 0x1E) {                    /* F7: toggle the Alt-Tab window switcher overlay */
                 int o = sw_open; close_overlays(); sw_open = !o;          /* one overlay at a time */
+                sw_alt = 0;                                               /* F7-opened: Enter commits, not Alt-release */
                 if (sw_open) sw_sel = win_count - 1;                      /* start on the focused (topmost) window */
                 dirty = 1;
                 continue;
@@ -1955,8 +1965,35 @@ void desktop_run(void) {
             int rawmode = top && !top->minimized && top->kind == KIND_APP &&
                           top->app && app_get_rawkb((app_t *)top->app);
             int ev;
-            while ((ev = input_pop_raw()) >= 0)
+            while ((ev = input_pop_raw()) >= 0) {
+                int code = ev & 0x7F, rel = (ev & 0x100) != 0;
+                /* Track the modifiers but STILL forward them: a raw-mode app
+                 * (DOOM) uses Alt and Shift itself. Only the Tab of an actual
+                 * Alt+Tab is swallowed. */
+                if (code == 0x38)                    alt_down   = !rel;   /* Alt (either side; 0x200 = right) */
+                else if (code == 0x2A || code == 0x36) shift_down = !rel; /* Shift */
+
+                if (code == 0x0F && !rel && alt_down) {       /* Alt+Tab / Alt+Shift+Tab */
+                    if (win_count > 1) {
+                        if (!sw_open) {                        /* open it and step off the current window */
+                            close_overlays();                  /* one overlay at a time */
+                            sw_open = 1; sw_alt = 1;
+                            sw_sel = win_count - 1;
+                        }
+                        sw_sel = shift_down ? (sw_sel + 1) % win_count
+                                            : (sw_sel + win_count - 1) % win_count;
+                        dirty = 1;
+                    }
+                    continue;                                  /* never let Tab reach the app */
+                }
+                if (code == 0x38 && rel && sw_open && sw_alt) {  /* Alt released: commit */
+                    raise_window(sw_sel);
+                    dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1;
+                    sw_open = sw_alt = 0;
+                    dirty = 1;
+                }
                 if (rawmode) app_key_raw((app_t *)top->app, (unsigned short)ev);
+            }
         }
 
         int mx = mouse_x(), my = mouse_y(), btn = mouse_buttons(), left = btn & 1;
