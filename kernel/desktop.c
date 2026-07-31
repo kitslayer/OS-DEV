@@ -100,7 +100,8 @@ static int sw_open, sw_sel;                 /* F7: Alt-Tab-style window switcher
  * modifier state. sw_alt marks a switcher opened by the chord, so releasing Alt
  * commits the selection (the Windows/macOS model: hold Alt, tab to choose,
  * release to switch) while an F7-opened switcher still needs Enter. */
-static int alt_down, shift_down, sw_alt;
+static int alt_down, shift_down, super_down, sw_alt;
+static int super_used;   /* Super acted as a MODIFIER: don't also open the menu on release */
 
 /* Close the focused window. Shared by F8 and Alt+F4 (M1921) so the two chords
  * cannot drift apart. An APP window is asked to exit and the reap loop drops it;
@@ -1311,8 +1312,8 @@ static void render_scene(void) {
     if (help_open) {
         static const char *H[] = {
             "F1    this help",        "F2    switch window",
-            "F3    minimize",         "F4    maximize / restore",
-            "F5    snap left",        "F6    snap right",
+            "F3 / Super+Down  min",   "F4 / Super+Up  maximize",
+            "F5 / Super+Left  snap",  "F6 / Super+Right snap",
             "F7 / Alt+Tab  switcher", "F8 / Alt+F4  close",
             "F9 / Super   Apps menu",
             "F12   screenshot to disk",
@@ -2003,9 +2004,41 @@ void desktop_run(void) {
                     }
                     continue;
                 }
-                if (code == 0x5B && !rel) {                   /* Super/Windows key: Apps menu (M1921) */
-                    int o = menu_open; close_overlays(); menu_open = !o; menu_sel = 0;
-                    dirty = 1;
+                if (code == 0x5B) {                           /* Super/Windows key (M1921/M1922) */
+                    if (!rel) { super_down = 1; super_used = 0; }
+                    else {
+                        super_down = 0;
+                        /* Fire on RELEASE, and only if Super was not used as a
+                         * modifier -- otherwise Super+Left would snap AND leave the
+                         * launcher open on top of it. This is also what Windows and
+                         * GNOME do: the launcher opens on the tap, not the press. */
+                        if (!super_used) {
+                            int o = menu_open; close_overlays(); menu_open = !o; menu_sel = 0;
+                            dirty = 1;
+                        }
+                    }
+                    continue;
+                }
+                /* Super + arrows: the window-management chords everyone arrives with
+                 * (M1922). Snapping and maximizing already existed on F4/F5/F6; these
+                 * are the gestures people actually try. Arrows are E0-prefixed, but
+                 * `code` masks the extended flag off so both encodings match. */
+                if (super_down && !rel &&
+                    (code == 0x4B || code == 0x4D || code == 0x48 || code == 0x50)) {
+                    super_used = 1;
+                    if (win_count > 0) {
+                        int fi = win_count - 1;
+                        if (code == 0x4B)      snap_window(fi, 0);        /* Left  */
+                        else if (code == 0x4D) snap_window(fi, 1);        /* Right */
+                        else if (code == 0x48) toggle_maximize(fi);       /* Up    */
+                        else {                                            /* Down: minimize */
+                            int vis = 0;
+                            for (int i = 0; i < win_count; i++) if (!windows[i].minimized) vis++;
+                            if (vis > 1) { windows[fi].minimized = 1; sink_window(fi); }
+                        }
+                        dragging = resizing = selecting = bselecting = sbdrag = bsbdrag = -1;
+                        dirty = 1;
+                    }
                     continue;
                 }
                 if (code == 0x38 && rel && sw_open && sw_alt) {  /* Alt released: commit */
