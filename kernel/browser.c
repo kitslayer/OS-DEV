@@ -4980,7 +4980,12 @@ void browser_render(browser_t *b, int x, int y, int w, int h) {
             for (int k = 0; k < mxsp; k++) if (mxclip[k] < clipy_) clipy_ = mxclip[k];
             int maxc = (cr - cx) / (GW * sc); if (maxc < 0) maxc = 0;
             int dl = tk->len > maxc ? maxc : tk->len;      /* clip to content width (no h-scroll) */
-            if (cy >= clipy_) dl = 0;                      /* vertically clipped away */
+            /* BOTTOM edge, not the top: the line that STRADDLES the clip bottom
+             * starts inside the box but paints past it, and keying on the top left
+             * exactly that line visible below the box — caught on screen, not by
+             * the first version of the test. Same boundary the M1910 background
+             * suppression had to get right. */
+            if (cy + lh > clipy_) dl = 0;                  /* vertically clipped away */
             int drawpx = dl * GW * sc;
             /* mouse text selection: highlight selected word tokens (white on blue) */
             if (b->tsel0 >= 0 && tk->type == TK_WORD) {

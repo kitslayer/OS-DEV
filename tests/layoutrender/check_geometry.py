@@ -120,11 +120,7 @@ def main():
         for name, rgb in COL.items():
             if boxes[name] is None:
                 boxes[name] = bbox(px, w, h, rgb)
-    # clipdeep is EXPECTED to be absent -- it is the overflow:hidden assertion
-    # (a colour that only appears if content outside its box was painted), so it
-    # must not be treated as a case that failed to render.
-    EXPECT_ABSENT = {"clipdeep"}
-    missing = [n for n, v in boxes.items() if v is None and n not in EXPECT_ABSENT]
+    missing = [n for n, v in boxes.items() if v is None]
     if missing:
         print("FAIL: these cases did not render at all: %s" % ", ".join(sorted(missing)))
         print("      (the page may not have loaded, or a colour changed in LAYCHK.HTM)")
@@ -277,8 +273,14 @@ def main():
     # colour is missing is much stronger than asserting a box got shorter -- a
     # box can shrink for many reasons, but this colour can only appear if content
     # outside the box was painted.
-    ck(boxes["clipdeep"] is None,
-       "overflow:hidden clips content below the box (the deep span's colour is absent)")
+    # The clipped block's ENTIRE text is wrapped in a span with its own background,
+    # so that colour's bbox IS the painted-content extent. Asserting it stays inside
+    # the box is stronger than asserting some far-below marker is absent: it also
+    # catches the line that STRADDLES the clip bottom, which the first version of
+    # this test missed entirely and a screenshot caught.
+    ck(boxes["clipdeep"][3] <= boxes["clip"][3] + TOL,
+       "overflow:hidden keeps ALL painted content inside the box (content bottom %d "
+       "vs box bottom %d)" % (boxes["clipdeep"][3], boxes["clip"][3]))
     ck(abs(height("clip") - 40) <= 6,
        "the clipped block is still 40px tall (got %d)" % height("clip"))
     ck(abs(advance("clip", "afterclip") - (40 + BREAK)) <= 6,
