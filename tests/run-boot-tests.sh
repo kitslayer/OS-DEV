@@ -47,6 +47,7 @@ echo "booting kernel headless under QEMU (COM1 capture)..."
 # false-positive hang report would be worse than the flake it replaces. Costs
 # nothing normally: the poll loop breaks as soon as the marker lands.
 timeout -s KILL 60 "$QEMU" -no-reboot -no-shutdown -m 256M -kernel "$KERNEL" \
+    -append selftest \
     -drive file="$DISK",format=raw,if=ide \
     -netdev user,id=net0 -device e1000,netdev=net0 \
     -device piix3-usb-uhci,id=uhci -device usb-tablet,bus=uhci.0 \

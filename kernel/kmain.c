@@ -251,6 +251,13 @@ static volatile int g_nodisk;                 /* -append nodisk: skip ALL disk-W
  * measurement then REJECTED (httpdtest passes 6/6 with the demo on, once the test
  * waits for the real listen marker), so don't read a known bug into its existence. */
 static volatile int g_nonetdemo;
+/* -append selftest: run the CONCURRENCY self-tests (M1912-M1915: CFS vruntime
+ * charging, CMOS index/data atomicity, PCI config address/data atomicity,
+ * kprintf line serialisation). Gated because together they cost ~0.9 s of boot,
+ * and boot-to-desktop is a number this project deliberately keeps low (~1.5 s).
+ * run-boot-tests.sh passes it, so the gate still runs them on every `make check`
+ * -- it is the only consumer of their markers. */
+static volatile int g_selftest;
 static volatile int g_watchdog;               /* -append watchdog: arm the HW watchdog + panic-auto-reboot so a hang/crash self-heals via PXE (M1881) */
 static volatile int g_wdhang;                 /* -append wdhang: deliberately wedge the CPU to prove the HW watchdog resets a true hang (M1881) */
 
@@ -454,6 +461,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
         struct multiboot_info *mbi = (struct multiboot_info *)(uintptr_t)mb_info;
         const char *cl = ((mbi->flags & (1u << 2)) && mbi->cmdline) ? (const char *)(uintptr_t)mbi->cmdline : "";
         if (cmdline_has(cl, "nonetdemo"))  g_nonetdemo = 1;      /* M1909 */
+        if (cmdline_has(cl, "selftest"))   g_selftest = 1;       /* M1916 */
         if (cmdline_has(cl, "gdbstub"))    gdbstub_arm();
         if (cmdline_has(cl, "kstackover")) g_kstack_overflow_test = 1;   /* deliberate KERNEL-stack overflow test (M1498) */
         if (cmdline_has(cl, "ustackover")) g_ustack_overflow_test = 1;   /* deliberate USER-stack overflow test (M1500) */
@@ -858,10 +866,12 @@ void kmain(uint64_t mb_info, uint64_t magic) {
      * memory, ptys, advisory locks, inotify, eventfd) — ~2,700 lines that had no
      * automated assertions at all until M1906. Non-blocking operations only; see
      * ipcselftest.c for why. Leaves no objects behind. */
-    sched_selftest();   /* M1912: fast yields must advance vruntime */
-    rtc_selftest();     /* M1913: CMOS index/data pair is atomic under concurrency */
-    pci_selftest();     /* M1914: PCI config address/data pair is indivisible */
-    console_selftest(); /* M1915: concurrent kprintf lines are never spliced */
+    if (g_selftest) {           /* -append selftest (M1916): ~0.9 s, so opt-in */
+        sched_selftest();   /* M1912: fast yields must advance vruntime */
+        rtc_selftest();     /* M1913: CMOS index/data pair is atomic under concurrency */
+        pci_selftest();     /* M1914: PCI config address/data pair is indivisible */
+        console_selftest(); /* M1915: concurrent kprintf lines are never spliced */
+    }
     ipc_selftest();
 
     kprintf("[main] launching the desktop environment...\n");
