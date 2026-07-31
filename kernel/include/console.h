@@ -24,3 +24,4 @@ void klog_write(const char *buf, int n);   /* append userspace bytes to the log 
  * (for the network debug console). Single-consumer, best-effort; returns bytes. */
 void console_capture_begin(char *buf, int max);
 int  console_capture_end(void);
+void console_selftest(void);

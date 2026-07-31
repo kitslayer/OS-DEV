@@ -119,6 +119,24 @@ require "eBPF JIT OK"                         "eBPF JIT: bytecode compiled to na
 require "sched: 64 sub-millisecond yields advanced vruntime"  "CFS charges sub-ms yields (M1912: a yield-spinner cannot starve a lock holder)"
 require "concurrent CMOS reads from 2 tasks"  "RTC CMOS index/data pair is atomic under concurrent readers (M1913)"
 require "concurrent config reads of 2 devices"  "PCI 0xCF8/0xCFC address/data pair is indivisible under concurrent readers (M1914)"
+# M1915: kprintf had no lock, so two tasks logging at once spliced their lines
+# together character-by-character -- corrupting the very serial log every headless
+# suite greps (this project previously blamed that shape on harness timing). The
+# guest emits 120 long lines from 2 tasks; the corruption is in the log STREAM, so
+# only the host can check it. Long lines on purpose: with the lock removed this
+# catches 41-51 splices of ~115 lines, where 48-char lines caught only ~1.
+cs_n=$(grep -c '^\[cs\]' "$LOG" 2>/dev/null || true)
+cs_bad=$(grep '^\[cs\]' "$LOG" 2>/dev/null | grep -c 'A.*B\|B.*A' || true)
+if [ "${cs_n:-0}" -gt 0 ] && [ "${cs_bad:-0}" -eq 0 ]; then
+    echo "  ok: concurrent kprintf lines are never spliced ($cs_n lines from 2 tasks, 0 mixed)"
+elif [ "${cs_n:-0}" -eq 0 ]; then
+    echo "  MISSING: console log-splicing check (no '[cs]' lines -- did console_selftest run?)"
+    fail=1
+else
+    echo "  MISSING: $cs_bad of $cs_n concurrent kprintf lines were SPLICED -- the console lock is not serialising whole lines"
+    grep '^\[cs\]' "$LOG" | grep 'A.*B\|B.*A' | head -2 | cut -c1-100 | sed 's/^/           /'
+    fail=1
+fi
 require "Networking works!"                  "e1000 + ARP + ICMP echo (SLIRP gateway)"
 softrequire "200 OK"                         "TCP/HTTP GET to real example.com (needs internet)"
 softrequire "certverify=ok"                  "TLS 1.3 HTTPS to example.com: chain validated + certverify (needs internet)"

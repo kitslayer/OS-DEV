@@ -861,6 +861,7 @@ void kmain(uint64_t mb_info, uint64_t magic) {
     sched_selftest();   /* M1912: fast yields must advance vruntime */
     rtc_selftest();     /* M1913: CMOS index/data pair is atomic under concurrency */
     pci_selftest();     /* M1914: PCI config address/data pair is indivisible */
+    console_selftest(); /* M1915: concurrent kprintf lines are never spliced */
     ipc_selftest();
 
     kprintf("[main] launching the desktop environment...\n");

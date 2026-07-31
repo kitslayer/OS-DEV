@@ -13,6 +13,8 @@
  * and sizes in a 64-bit kernel don't fit in an int.
  */
 #include "console.h"
+#include "smp.h"      /* smp_current_cpu — console lock re-entry guard (M1915) */
+#include "task.h"     /* console_selftest spawns a concurrent logger (M1915) */
 #include "vga.h"
 #include "serial.h"
 #include "fbcon.h"
@@ -93,9 +95,49 @@ void console_putc(char c) {
     serial_putc(c);
 }
 
+/* ---- console serialization (M1915) -------------------------------------------
+ * kprintf had NO lock, so two tasks logging at once interleaved CHARACTER BY
+ * CHARACTER. Real captured output from this kernel:
+ *     MARGIN.HTM  (1477 bytes)[hb] ticks=164 n=4 | id6 st=1; ...
+ * That is two tasks' lines spliced together. It is not cosmetic: it corrupts the
+ * serial log that every headless test greps, and this project previously
+ * attributed exactly this shape ("foreign lines bleeding into a suite's block")
+ * to harness timing rather than to the kernel.
+ *
+ * A whole formatted line is emitted under one lock. Interrupts are disabled for
+ * the duration, which is what makes it deadlock-free: a same-core IRQ handler
+ * cannot arrive mid-line and try to take a lock we are holding, and another
+ * core's handler simply spins until we release. The honest cost is that
+ * interrupts stay off for one line of output, and serial_putc busy-waits on the
+ * UART (~87 us/byte at 115200 on real hardware) — acceptable because the kernel
+ * logs at boot and during tests, not in steady-state hot paths, and garbled logs
+ * have already cost real debugging time.
+ *
+ * con_owner makes re-entry on the SAME core (a fault or NMI raised while we are
+ * inside a log call) print rather than deadlock — the panic path must never be
+ * silenced by this lock. */
+static volatile int con_lock;
+static volatile int con_owner = -1;      /* core currently emitting, -1 = none */
+
+static inline int con_take(uint64_t *fl) {
+    uint64_t f; __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
+    int me = smp_current_cpu();
+    *fl = f;
+    if (con_owner == me) return 0;                       /* re-entered: don't block */
+    while (__atomic_exchange_n(&con_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    con_owner = me;
+    return 1;
+}
+static inline void con_give(int held, uint64_t f) {
+    if (held) { con_owner = -1; __atomic_store_n(&con_lock, 0, __ATOMIC_RELEASE); }
+    __asm__ volatile("push %0; popfq" : : "r"(f) : "memory", "cc");
+}
+
 void console_write(const char *s) {
+    uint64_t f; int held = con_take(&f);
     for (; *s; s++)
         console_putc(*s);
+    con_give(held, f);
 }
 
 /* ---- number formatting ------------------------------------------------- */
@@ -123,6 +165,7 @@ static void print_uint(uint64_t value, unsigned base, bool upper,
 /* ---- the formatter ----------------------------------------------------- */
 
 void kvprintf(const char *fmt, va_list ap) {
+    uint64_t f_; int held_ = con_take(&f_);
     for (; *fmt; fmt++) {
         if (*fmt != '%') {
             console_putc(*fmt);
@@ -186,6 +229,7 @@ void kvprintf(const char *fmt, va_list ap) {
             break;
         }
     }
+    con_give(held_, f_);
 }
 
 void kprintf(const char *fmt, ...) {
@@ -193,4 +237,47 @@ void kprintf(const char *fmt, ...) {
     va_start(ap, fmt);
     kvprintf(fmt, ap);
     va_end(ap);
+}
+
+/* ---- boot self-test: a log line must never be spliced (M1915) ----------------
+ * Two tasks emit distinctive fixed lines as fast as they can. With the console
+ * lock working, every "[cs]" line in the serial log is all-A or all-B. Without
+ * it, lines come out spliced, which the host-side check in run-boot-tests.sh
+ * detects — the assertion has to live on the host because the corruption is in
+ * the log stream itself, which the guest cannot see.
+ *
+ * Every line is the same length and printed with ONE kprintf, so any mixture of
+ * A and B on one line is proof the emission was not atomic. */
+static volatile int cs_stop, cs_done;
+/* Long lines on purpose: a splice can only happen if a preemption lands INSIDE
+ * one emission, so the detection rate scales with how long the critical section
+ * is. 48-char lines gave only ~1 splice per boot when the lock was removed,
+ * which is too thin a margin for a regression gate; ~360 chars gives many. */
+static const char cs_ayes[] = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+static const char cs_bees[] = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+
+static void console_selftest_peer(void) {
+    for (int i = 0; i < 60 && !cs_stop; i++) {
+        kprintf("[cs] %s\n", cs_bees);
+        task_yield();
+    }
+    __atomic_store_n(&cs_done, 1, __ATOMIC_SEQ_CST);
+    task_exit();
+}
+
+void console_selftest(void) {
+    cs_stop = cs_done = 0;
+    if (!task_create_stack(console_selftest_peer, 0, 0, 16 * 1024)) {
+        kprintf("[ ok ] console: log-splicing self-test skipped (no task slot)\n");
+        return;
+    }
+    for (int i = 0; i < 60; i++) {
+        kprintf("[cs] %s\n", cs_ayes);
+        task_yield();
+    }
+    __atomic_store_n(&cs_stop, 1, __ATOMIC_SEQ_CST);
+    for (int i = 0; i < 100000 && !__atomic_load_n(&cs_done, __ATOMIC_SEQ_CST); i++)
+        task_yield();
+    kprintf("[ ok ] console: emitted 120 long interleaved log lines from 2 tasks "
+            "(host checks none were spliced)\n");
 }
